@@ -6,7 +6,7 @@ import NotFound from './Pages/NotFound/NotFound';
 import Success from './Pages/Success/Success';
 import './App.css'
 const App = () => {
-  return (
+  return 
     <>
       <Router>
         <Routes>
@@ -19,6 +19,6 @@ const App = () => {
     </>
   )
 }
-const a = ;
+
 
 export default App

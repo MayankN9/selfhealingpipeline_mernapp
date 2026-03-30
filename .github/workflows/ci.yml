@@ -12,18 +12,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 📥 Checkout code
+      # 📥 Checkout
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 🟢 Setup Node
+      # 🟢 Node setup
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 🛑 Prevent infinite AI loop
-      - name: Check if AI already fixed
+      # 🛑 Prevent infinite loop
+      - name: Guard AI Loop
         id: guard
         run: |
           LAST_MSG=$(git log -1 --pretty=%B)
@@ -33,14 +33,14 @@ jobs:
             echo "skip_fix=false" >> $GITHUB_OUTPUT
           fi
 
-      # 📦 Install backend dependencies
-      - name: Install Backend Dependencies
+      # 📦 Install backend
+      - name: Install Backend
         run: |
           cd backend
           npm install
 
-      # 📦 Install frontend dependencies
-      - name: Install Frontend Dependencies
+      # 📦 Install frontend
+      - name: Install Frontend
         run: |
           cd frontend
           npm install
@@ -51,61 +51,69 @@ jobs:
         continue-on-error: true
         run: |
           cd frontend
-          npm run build 2>&1 | tee build.log
+          npm run build > build.log 2>&1
 
-      # 🛠 Install jq (for JSON parsing)
-      - name: Install jq
+      # 🔍 Print logs (for debugging)
+      - name: Show Build Logs
         if: steps.build_step.outcome == 'failure'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
+          echo "---- BUILD ERROR ----"
+          tail -n 50 frontend/build.log
 
-      # 🤖 Generate patch using OpenAI (SAFE VERSION)
+      # 🛠 Install jq
+      - name: Install jq
+        if: steps.build_step.outcome == 'failure'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # 🤖 Generate AI fix (robust version)
       - name: Generate Patch via AI
         if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
-        id: ai_patch
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "🔍 Generating patch from AI..."
+          echo "🔍 Preparing prompt..."
 
           ERROR_LOG=$(tail -n 40 frontend/build.log)
 
-          # Create prompt safely
-          cat <<EOF > prompt.txt
-You are a senior React engineer.
-Fix the error below and return ONLY a unified diff patch.
-Do not include explanations.
-
-ERROR:
-$ERROR_LOG
+          # Create JSON safely (NO inline escaping issues)
+          cat <<EOF > request.json
+{
+  "model": "gpt-4.1-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Fix this React build error. Return ONLY a unified diff patch.\n\n$ERROR_LOG"
+    }
+  ]
+}
 EOF
 
-          # Build JSON safely using jq
-          REQUEST_BODY=$(jq -n --arg prompt "$(cat prompt.txt)" '{
-            model: "gpt-4.1-mini",
-            messages: [{role: "user", content: $prompt}]
-          }')
+          echo "📡 Sending to OpenAI..."
 
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "$REQUEST_BODY")
+            -d @request.json > response.json
 
-          PATCH=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+          echo "📥 AI response received"
 
-          echo "$PATCH" > fix.patch
+          cat response.json | jq '.'
 
-          echo "📄 Patch preview:"
+          # Extract patch
+          jq -r '.choices[0].message.content' response.json > fix.patch
+
+          echo "📄 Patch Preview:"
           head -n 20 fix.patch
 
-      # 🔧 Apply patch
+      # 🔧 Apply patch safely
       - name: Apply Patch
         if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
         run: |
           echo "🛠 Applying patch..."
-          git apply --whitespace=fix fix.patch || {
-            echo "❌ Patch failed"; exit 1;
+
+          git apply fix.patch || {
+            echo "❌ Patch failed to apply"
+            exit 1
           }
 
       # 🔁 Rebuild after fix
@@ -117,7 +125,7 @@ EOF
           cd frontend
           npm run build
 
-      # 📤 Commit AI fix
+      # 📤 Commit fix (only if success)
       - name: Commit AI Fix
         if: steps.rebuild.outcome == 'success'
         run: |
@@ -125,5 +133,5 @@ EOF
           git config --global user.email "ai@bot.com"
 
           git add .
-          git commit -m "[ai-fix] auto fix applied"
+          git commit -m "[ai-fix] automated fix"
           git push

@@ -10,32 +10,28 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      # Backend
       - name: Install Backend Dependencies
         run: |
           cd backend
           npm install
 
-      # Start backend (in background)
       - name: Start Backend Server
         run: |
           cd backend
           npm start &
           sleep 10
 
-      # Test API
-      - name: Test API Endpoint
+      - name: Test API
         run: |
-          curl -X GET http://localhost:5000/ || exit 1
+          curl http://localhost:5000/ || exit 1
 
-      # Frontend
       - name: Install Frontend Dependencies
         run: |
           cd frontend

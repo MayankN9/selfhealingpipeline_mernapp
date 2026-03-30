@@ -6,13 +6,14 @@ import NotFound from './Pages/NotFound/NotFound';
 import Success from './Pages/Success/Success';
 import './App.css'
 const App = () => {
-  return 
+  return (
     <>
       <Router>
         <Routes>
           <Route path='/' element={<Home/>}/>
           <Route path='/success' element={<Success/>}/>
           <Route path='*' element={<NotFound/>}/>
+          <h1>Hello
         </Routes>
         <Toaster/>
       </Router>

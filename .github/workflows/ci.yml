@@ -1,67 +1,122 @@
-name: MERN CI Pipeline (Self-Healing v2)
+\name: Self-Healing CI Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      # 📥 Checkout repo
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 🟢 Setup Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
 
-      # Backend
-      - name: Install Backend
+      # 🛑 Prevent infinite loop
+      - name: Check if AI already fixed
+        id: guard
+        run: |
+          LAST_MSG=$(git log -1 --pretty=%B)
+          if echo "$LAST_MSG" | grep -q "\[ai-fix\]"; then
+            echo "skip_fix=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip_fix=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 📦 Install backend deps
+      - name: Install Backend Dependencies
         run: |
           cd backend
           npm install
 
-      # Frontend
-      - name: Install Frontend
+      # 📦 Install frontend deps
+      - name: Install Frontend Dependencies
         run: |
           cd frontend
           npm install
 
-      # 🔥 Build with log capture
-      - name: Build Frontend (Attempt 1)
+      # 🧪 Build frontend (capture logs)
+      - name: Build Frontend
         id: build_step
         continue-on-error: true
         run: |
           cd frontend
           npm run build 2>&1 | tee build.log
 
-      # 🧠 Save logs if failed
-      - name: Upload Logs
+      # 🛠 Install jq (for parsing)
+      - name: Install jq
         if: steps.build_step.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-logs
-          path: frontend/build.log
+        run: sudo apt-get update && sudo apt-get install -y jq
 
-      # 🤖 AI Analysis (simulation)
-      - name: Analyze Error (AI Simulation)
-        if: steps.build_step.outcome == 'failure'
+      # 🤖 AI generates patch
+      - name: Generate Patch via AI
+        if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
+        id: ai_patch
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          echo "Analyzing error..."
-          cat frontend/build.log | tail -n 20
+          echo "🔍 Generating patch from AI..."
 
-          echo "----- AI SUGGESTION -----"
-          echo "Possible fixes:"
-          echo "- Run npm install"
-          echo "- Check syntax error"
-          echo "- Missing dependency?"
+          ERROR_LOG=$(tail -n 40 frontend/build.log)
 
-      # 🔁 Retry
-      - name: Retry Build (Attempt 2)
-        if: steps.build_step.outcome == 'failure'
+          PROMPT="You are a senior React engineer.
+Given the build error below, produce a MINIMAL unified diff patch that fixes ONLY the error.
+Target files under frontend/.
+Do not add explanations. Output ONLY the patch.
+
+ERROR:
+$ERROR_LOG
+"
+
+          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"model\": \"gpt-4.1-mini\",
+              \"messages\": [{\"role\":\"user\",\"content\": \"$PROMPT\"}]
+            }")
+
+          PATCH=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
+
+          echo "$PATCH" > fix.patch
+          echo "Patch preview:"
+          head -n 50 fix.patch
+
+      # 🔧 Apply patch
+      - name: Apply Patch
+        if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
+        run: |
+          echo "🛠 Applying patch..."
+          git apply --whitespace=fix fix.patch || {
+            echo "❌ Patch failed"; exit 1;
+          }
+
+      # 🔁 Rebuild after fix
+      - name: Rebuild After Fix
+        if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
+        id: rebuild
+        continue-on-error: true
         run: |
           cd frontend
-          npm install
           npm run build
+
+      # 📤 Commit AI fix
+      - name: Commit AI Fix
+        if: steps.rebuild.outcome == 'success'
+        run: |
+          git config --global user.name "ai-bot"
+          git config --global user.email "ai@bot.com"
+
+          git add .
+          git commit -m "[ai-fix] auto fix applied"
+          git push

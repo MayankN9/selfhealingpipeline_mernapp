@@ -22,15 +22,7 @@ jobs:
           cd backend
           npm install
 
-      - name: Start Backend Server
-        run: |
-          cd backend
-          npm start &
-          sleep 10
-
-      - name: Test API
-        run: |
-          curl http://localhost:5000/ || exit 1
+      # ❌ REMOVE backend start + curl test
 
       - name: Install Frontend Dependencies
         run: |

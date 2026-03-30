@@ -3,6 +3,7 @@ import send_reservation from "../controller/reservation.js";
 
 const router = express.Router();
 
+// ✅ POST route to create reservation
 router.post("/send", send_reservation);
 
 export default router;

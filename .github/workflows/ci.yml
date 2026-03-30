@@ -1,4 +1,4 @@
-\name: Self-Healing CI Pipeline
+name: Self-Healing CI Pipeline
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 📥 Checkout repo
+      # 📥 Checkout code
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 20
 
-      # 🛑 Prevent infinite loop
+      # 🛑 Prevent infinite AI loop
       - name: Check if AI already fixed
         id: guard
         run: |
@@ -33,13 +33,13 @@ jobs:
             echo "skip_fix=false" >> $GITHUB_OUTPUT
           fi
 
-      # 📦 Install backend deps
+      # 📦 Install backend dependencies
       - name: Install Backend Dependencies
         run: |
           cd backend
           npm install
 
-      # 📦 Install frontend deps
+      # 📦 Install frontend dependencies
       - name: Install Frontend Dependencies
         run: |
           cd frontend
@@ -53,12 +53,14 @@ jobs:
           cd frontend
           npm run build 2>&1 | tee build.log
 
-      # 🛠 Install jq (for parsing)
+      # 🛠 Install jq (for JSON parsing)
       - name: Install jq
         if: steps.build_step.outcome == 'failure'
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
 
-      # 🤖 AI generates patch
+      # 🤖 Generate patch using OpenAI (SAFE VERSION)
       - name: Generate Patch via AI
         if: steps.build_step.outcome == 'failure' && steps.guard.outputs.skip_fix == 'false'
         id: ai_patch
@@ -69,28 +71,33 @@ jobs:
 
           ERROR_LOG=$(tail -n 40 frontend/build.log)
 
-          PROMPT="You are a senior React engineer.
-Given the build error below, produce a MINIMAL unified diff patch that fixes ONLY the error.
-Target files under frontend/.
-Do not add explanations. Output ONLY the patch.
+          # Create prompt safely
+          cat <<EOF > prompt.txt
+You are a senior React engineer.
+Fix the error below and return ONLY a unified diff patch.
+Do not include explanations.
 
 ERROR:
 $ERROR_LOG
-"
+EOF
+
+          # Build JSON safely using jq
+          REQUEST_BODY=$(jq -n --arg prompt "$(cat prompt.txt)" '{
+            model: "gpt-4.1-mini",
+            messages: [{role: "user", content: $prompt}]
+          }')
 
           RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
             -H "Authorization: Bearer $OPENAI_API_KEY" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"model\": \"gpt-4.1-mini\",
-              \"messages\": [{\"role\":\"user\",\"content\": \"$PROMPT\"}]
-            }")
+            -d "$REQUEST_BODY")
 
           PATCH=$(echo "$RESPONSE" | jq -r '.choices[0].message.content')
 
           echo "$PATCH" > fix.patch
-          echo "Patch preview:"
-          head -n 50 fix.patch
+
+          echo "📄 Patch preview:"
+          head -n 20 fix.patch
 
       # 🔧 Apply patch
       - name: Apply Patch

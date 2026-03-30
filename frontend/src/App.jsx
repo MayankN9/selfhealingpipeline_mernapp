@@ -19,5 +19,6 @@ const App = () => {
     </>
   )
 }
+const a = ;
 
 export default App

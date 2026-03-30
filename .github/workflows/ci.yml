@@ -1,4 +1,4 @@
-name: MERN CI Pipeline (Self-Healing v1)
+name: MERN CI Pipeline (Self-Healing v2)
 
 on:
   push:
@@ -17,32 +17,48 @@ jobs:
         with:
           node-version: 18
 
-      # Backend install
-      - name: Install Backend Dependencies
+      # Backend
+      - name: Install Backend
         run: |
           cd backend
           npm install
 
-      # Frontend install
-      - name: Install Frontend Dependencies
+      # Frontend
+      - name: Install Frontend
         run: |
           cd frontend
           npm install
 
-      # 🔥 TRY BUILD (first attempt)
+      # 🔥 Build with log capture
       - name: Build Frontend (Attempt 1)
         id: build_step
         continue-on-error: true
         run: |
           cd frontend
-          npm run build
+          npm run build 2>&1 | tee build.log
 
-      # 🧠 CHECK IF FAILED
-      - name: Check Build Status
+      # 🧠 Save logs if failed
+      - name: Upload Logs
         if: steps.build_step.outcome == 'failure'
-        run: echo "Build failed. Triggering self-healing..."
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs
+          path: frontend/build.log
 
-      # 🔁 RETRY (self-healing step)
+      # 🤖 AI Analysis (simulation)
+      - name: Analyze Error (AI Simulation)
+        if: steps.build_step.outcome == 'failure'
+        run: |
+          echo "Analyzing error..."
+          cat frontend/build.log | tail -n 20
+
+          echo "----- AI SUGGESTION -----"
+          echo "Possible fixes:"
+          echo "- Run npm install"
+          echo "- Check syntax error"
+          echo "- Missing dependency?"
+
+      # 🔁 Retry
       - name: Retry Build (Attempt 2)
         if: steps.build_step.outcome == 'failure'
         run: |
